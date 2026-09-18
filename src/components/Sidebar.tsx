@@ -1,12 +1,22 @@
 import { forwardRef } from 'react'
 import type { RefObject } from 'react'
-import type { Annotation, AnnotationBaseline, ConflictRule } from '../types'
+import type {
+  Annotation,
+  AnnotationBaseline,
+  ConflictRule,
+  SampleConfig,
+  SampleReview,
+  SampleTarget,
+  SampleVerdict,
+} from '../types'
 import { REASON_LABEL } from '../lib/relocation'
 import { badgeColor } from '../lib/segments'
 import type { ConflictItem } from '../lib/conflicts'
 import type { CoverageIssue, CoverageResult } from '../lib/coverage'
 import type { SnapshotDiffItem } from '../lib/snapshot'
+import type { SampleQueueResult } from '../lib/sampling'
 import { SnapshotSection } from './SnapshotSection'
+import { SamplingSection } from './SamplingSection'
 
 interface Props {
   text: string
@@ -31,6 +41,19 @@ interface Props {
   onToggleReview: (item: SnapshotDiffItem) => void
   /** 快照对比分区的滚动定位 ref（顶栏按钮用） */
   snapshotSectionRef?: RefObject<HTMLElement | null>
+  /** 抽样复核 */
+  sampleConfig: SampleConfig | null
+  sampleQueue: SampleQueueResult
+  sampleReviews: SampleReview[]
+  onSaveSampleConfig: (seed: string, targets: SampleTarget[]) => void
+  onClearSampleConfig: () => void
+  onSetSampleReview: (
+    annotation: Annotation,
+    verdict: SampleVerdict | null,
+    note: string,
+  ) => void
+  /** 抽样复核分区的滚动定位 ref（顶栏按钮用） */
+  samplingSectionRef?: RefObject<HTMLElement | null>
   onFocus: (a: Annotation) => void
   onEdit: (a: Annotation) => void
   onRebindStart: (a: Annotation) => void
@@ -41,6 +64,8 @@ interface Props {
   onConfigureRules: () => void
   onRenameTags: () => void
   tagCount: number
+  /** 当前全部标签（标注使用 + 规则引用），供抽样配置表单列出 */
+  allTags: string[]
 }
 
 /** 覆盖问题的稳定键：类型 + 起点（审计结果按起点唯一排列） */
@@ -481,6 +506,20 @@ export const Sidebar = forwardRef<HTMLElement, Props>(function Sidebar(props, se
         onToggleReview={props.onToggleReview}
         onFocus={props.onFocus}
         sectionRef={props.snapshotSectionRef}
+      />
+
+      <SamplingSection
+        config={props.sampleConfig}
+        allTags={props.allTags}
+        annotations={props.annotations}
+        queue={props.sampleQueue}
+        reviews={props.sampleReviews}
+        activeId={props.activeId}
+        onSaveConfig={props.onSaveSampleConfig}
+        onClearConfig={props.onClearSampleConfig}
+        onSetReview={props.onSetSampleReview}
+        onFocus={props.onFocus}
+        sectionRef={props.samplingSectionRef}
       />
 
       <section className="side-section" ref={sectionRef as React.Ref<HTMLElement>}>

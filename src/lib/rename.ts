@@ -12,6 +12,7 @@ import type {
   Annotation,
   ConflictRule,
   IgnoredConflict,
+  SampleTarget,
 } from '../types'
 import {
   conflictIgnoredKey,
@@ -53,6 +54,8 @@ export interface TagRenamePlan {
   ignoredConflicts: IgnoredConflict[]
   /** 覆盖审计所选标签（同步精确替换，保序去重） */
   coverageTags: string[]
+  /** 抽样复核配置中的标签配额：标签跟随重命名，同一目标的配额相加 */
+  sampleTargets: SampleTarget[]
   annotationChanges: AnnotationTagChange[]
   ruleChanges: RuleChange[]
   /** 引用了源标签的规则总数（= changed + merged + deleted 明细数） */
@@ -74,6 +77,8 @@ interface RenamePlanInput {
   ignoredConflicts: IgnoredConflict[]
   /** 覆盖审计所选标签；缺省视为空（旧调用方兼容） */
   coverageTags?: string[]
+  /** 抽样复核配置中的标签配额；缺省视为空（旧调用方兼容） */
+  sampleTargets?: SampleTarget[]
 }
 
 /** 判断规则是否引用源标签 */
@@ -116,6 +121,16 @@ export function planTagRename(
     const v = t === source ? target : t
     if (!coverageTags.includes(v)) coverageTags.push(v)
   }
+
+  // 抽样复核配额：标签跟随重命名；源、目标配额合并（相加），其余按标签排序
+  const sampleTargetMap = new Map<string, number>()
+  for (const t of doc.sampleTargets ?? []) {
+    const tag = t.tag === source ? target : t.tag
+    sampleTargetMap.set(tag, (sampleTargetMap.get(tag) ?? 0) + t.count)
+  }
+  const sampleTargets: SampleTarget[] = [...sampleTargetMap.entries()]
+    .map(([tag, count]) => ({ tag, count }))
+    .sort((x, y) => (x.tag < y.tag ? -1 : x.tag > y.tag ? 1 : 0))
 
   // ---------- 1. 标注标签：精确替换 + 同条去重保序 ----------
 
@@ -266,6 +281,7 @@ export function planTagRename(
     rules,
     ignoredConflicts: kept,
     coverageTags,
+    sampleTargets,
     annotationChanges,
     ruleChanges,
     affectedRuleCount: doc.conflictRules.filter((r) => touches(r, source)).length,

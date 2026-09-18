@@ -89,6 +89,38 @@ export interface ReviewedDiff {
   createdAt: number
 }
 
+/** 抽样复核配置：若干标签的抽样配额 + 决定稳定顺序的种子 */
+export interface SampleTarget {
+  tag: string
+  count: number
+}
+
+export interface SampleConfig {
+  /** 任意字符串；顺序按 SHA-256(种子 + 标注 ID) 生成，同配置必得同队列 */
+  seed: string
+  /** 需要抽样的标签与配额，按标签名字典序排列 */
+  targets: SampleTarget[]
+  createdAt: number
+  /** 最近一次生成 / 修改配置的时间（重建时更新） */
+  updatedAt: number
+}
+
+/** 复核结论 */
+export type SampleVerdict = 'pass' | 'return'
+
+/**
+ * 一条抽样复核结论：绑定「标注 ID + 标注内容签名」。
+ * 标注内容（区间/绑定状态、引文、标签、备注）变化后签名改变 → 结论自动失效，需要重新复核。
+ */
+export interface SampleReview {
+  annotationId: string
+  signature: string
+  verdict: SampleVerdict
+  note: string
+  createdAt: number
+  updatedAt: number
+}
+
 export interface DocumentData {
   title: string
   text: string
@@ -103,6 +135,10 @@ export interface DocumentData {
   baseline: AnnotationBaseline | null
   /** 快照差异已审记录：标注 ID + 差异内容签名 */
   reviewedDiffs: ReviewedDiff[]
+  /** 抽样复核配置（标签配额 + 种子；null 表示尚未配置） */
+  sampleConfig: SampleConfig | null
+  /** 抽样复核结论：标注 ID + 标注内容签名，内容变化自动失效 */
+  sampleReviews: SampleReview[]
   updatedAt: number
 }
 
@@ -146,6 +182,22 @@ export interface ExportPayload {
     annotationId: string
     signature: string
     createdAt: string
+  }>
+  /** 抽样复核配置（旧版文件缺省时按 null 处理） */
+  sampleConfig: {
+    seed: string
+    targets: Array<{ tag: string; count: number }>
+    createdAt: string
+    updatedAt: string
+  } | null
+  /** 抽样复核结论：标注 ID + 标注内容签名（旧版文件缺省时按空数组处理） */
+  sampleReviews: Array<{
+    annotationId: string
+    signature: string
+    verdict: SampleVerdict
+    note: string
+    createdAt: string
+    updatedAt: string
   }>
   annotations: Array<{
     id: string

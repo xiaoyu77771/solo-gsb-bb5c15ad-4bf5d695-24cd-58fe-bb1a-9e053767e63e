@@ -5,6 +5,9 @@ import type {
   DocumentData,
   ExportPayload,
   IgnoredConflict,
+  SampleReview,
+  SampleTarget,
+  SampleVerdict,
 } from './types'
 import {
   fingerprint,
@@ -41,6 +44,14 @@ import {
   reviewedKey,
   type SnapshotDiffItem,
 } from './lib/snapshot'
+import {
+  annotationContentSignature,
+  buildSampleQueue,
+  normalizeSampleConfig,
+  normalizeSampleReviews,
+  pruneSampleReviews,
+  sampleReviewKey,
+} from './lib/sampling'
 import { TextView, type ViewRect } from './components/TextView'
 import { TextEditor } from './components/TextEditor'
 import { Sidebar } from './components/Sidebar'
@@ -73,6 +84,8 @@ const EMPTY_DOC: DocumentData = {
   coverageTags: [],
   baseline: null,
   reviewedDiffs: [],
+  sampleConfig: null,
+  sampleReviews: [],
   updatedAt: Date.now(),
 }
 
@@ -102,6 +115,7 @@ export default function App() {
   const conflictSectionRef = useRef<HTMLElement | null>(null)
   const coverageSectionRef = useRef<HTMLElement | null>(null)
   const snapshotSectionRef = useRef<HTMLElement | null>(null)
+  const samplingSectionRef = useRef<HTMLElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // 本地持久化
@@ -198,6 +212,38 @@ export default function App() {
     }))
   }, [snapshotDiffs, doc.reviewedDiffs])
 
+  // ---------- 抽样复核 ----------
+
+  // 队列由配置与当前标注集确定性派生：同配置必得同队列，标注 / 配置变化自动重算
+  const sampleQueue = useMemo(
+    () => buildSampleQueue(doc.sampleConfig, doc.annotations),
+    [doc.sampleConfig, doc.annotations],
+  )
+
+  // 结论失效清理：标注被删除、进入待处理或区间/引文/标签/备注变化（内容签名改变）后移除
+  useEffect(() => {
+    if (pruneSampleReviews(doc.sampleReviews, doc.annotations).length === doc.sampleReviews.length) {
+      return
+    }
+    setDoc((d) => ({
+      ...d,
+      sampleReviews: pruneSampleReviews(d.sampleReviews, d.annotations),
+    }))
+  }, [doc.annotations, doc.sampleReviews])
+
+  // 抽中项中尚未留下有效结论的数量（顶栏 / 页脚用）
+  const pendingSampleCount = useMemo(() => {
+    if (!doc.sampleConfig) return 0
+    const validKeys = new Set(
+      doc.sampleReviews.map((r) => sampleReviewKey(r.annotationId, r.signature)),
+    )
+    const byId = new Map(doc.annotations.map((a) => [a.id, a]))
+    return sampleQueue.entries.filter((e) => {
+      const a = byId.get(e.annotationId)
+      return a && !validKeys.has(sampleReviewKey(a.id, annotationContentSignature(a)))
+    }).length
+  }, [doc.sampleConfig, doc.sampleReviews, doc.annotations, sampleQueue])
+
   const highlightIds: string[] = activePairIds
     ? [...activePairIds]
     : activeId
@@ -264,7 +310,9 @@ export default function App() {
         annotations,
         d.conflictRules,
       )
-      return { ...d, annotations, ignoredConflicts, updatedAt: Date.now() }
+      // 被删标注的抽样复核结论一并失效
+      const sampleReviews = pruneSampleReviews(d.sampleReviews, annotations)
+      return { ...d, annotations, ignoredConflicts, sampleReviews, updatedAt: Date.now() }
     })
     if (activeId === id) setActiveId(null)
     if (activePairIds?.includes(id)) setActivePairIds(null)
@@ -299,17 +347,22 @@ export default function App() {
           conflictRules: d.conflictRules,
           ignoredConflicts: d.ignoredConflicts,
           coverageTags: d.coverageTags,
+          sampleTargets: d.sampleConfig?.targets ?? [],
         },
         source,
         target,
       )
       if (!plan) return d
+      const sampleConfig = d.sampleConfig
+        ? { ...d.sampleConfig, targets: plan.sampleTargets }
+        : null
       return {
         ...d,
         annotations: plan.annotations,
         conflictRules: plan.rules,
         ignoredConflicts: plan.ignoredConflicts,
         coverageTags: plan.coverageTags,
+        sampleConfig,
         updatedAt: Date.now(),
       }
     })
@@ -425,6 +478,62 @@ export default function App() {
 
   const scrollToSnapshot = () => {
     snapshotSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
+  // ---------- 抽样复核 ----------
+
+  /** 保存 / 更新抽样配置：配额清洗（≥1 的整数、按标签排序去重），队列由数据确定性派生 */
+  const saveSampleConfig = (seed: string, targets: SampleTarget[]) => {
+    const now = Date.now()
+    setDoc((d) => ({
+      ...d,
+      sampleConfig: {
+        seed,
+        targets,
+        createdAt: d.sampleConfig?.createdAt ?? now,
+        updatedAt: now,
+      },
+      updatedAt: now,
+    }))
+  }
+
+  const clearSampleConfig = () => {
+    setDoc((d) => ({ ...d, sampleConfig: null, updatedAt: Date.now() }))
+  }
+
+  /** 写入 / 覆盖 / 清除一条复核结论：以「标注 ID + 当前内容签名」落库，内容变化自动失效 */
+  const setSampleReview = (
+    annotation: Annotation,
+    verdict: SampleVerdict | null,
+    note: string,
+  ) => {
+    const signature = annotationContentSignature(annotation)
+    const key = sampleReviewKey(annotation.id, signature)
+    setDoc((d) => {
+      const others = d.sampleReviews.filter(
+        (r) => sampleReviewKey(r.annotationId, r.signature) !== key,
+      )
+      if (!verdict) {
+        return { ...d, sampleReviews: others, updatedAt: Date.now() }
+      }
+      const prev = d.sampleReviews.find(
+        (r) => sampleReviewKey(r.annotationId, r.signature) === key,
+      )
+      const now = Date.now()
+      const rec: SampleReview = {
+        annotationId: annotation.id,
+        signature,
+        verdict,
+        note,
+        createdAt: prev?.createdAt ?? now,
+        updatedAt: now,
+      }
+      return { ...d, sampleReviews: [...others, rec], updatedAt: now }
+    })
+  }
+
+  const scrollToSampling = () => {
+    samplingSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
   // ---------- 编辑原文与重定位 ----------
@@ -555,6 +664,25 @@ export default function App() {
         signature: r.signature,
         createdAt: new Date(r.createdAt).toISOString(),
       })),
+      sampleConfig: doc.sampleConfig
+        ? {
+            seed: doc.sampleConfig.seed,
+            targets: doc.sampleConfig.targets.map((t) => ({
+              tag: t.tag,
+              count: t.count,
+            })),
+            createdAt: new Date(doc.sampleConfig.createdAt).toISOString(),
+            updatedAt: new Date(doc.sampleConfig.updatedAt).toISOString(),
+          }
+        : null,
+      sampleReviews: doc.sampleReviews.map((r) => ({
+        annotationId: r.annotationId,
+        signature: r.signature,
+        verdict: r.verdict,
+        note: r.note,
+        createdAt: new Date(r.createdAt).toISOString(),
+        updatedAt: new Date(r.updatedAt).toISOString(),
+      })),
       annotations: doc.annotations.map((a) => ({
         id: a.id,
         status: a.status,
@@ -633,6 +761,13 @@ export default function App() {
         normalizeReviewedDiffs(parsed.reviewedDiffs),
         diffSnapshot(baseline, annotations),
       )
+      // 旧版导出文件不含抽样配置：无损补空
+      const sampleConfig = normalizeSampleConfig(parsed.sampleConfig)
+      // 仅保留引用的标注仍存在、仍已绑定且内容签名一致的复核结论
+      const sampleReviews = pruneSampleReviews(
+        normalizeSampleReviews(parsed.sampleReviews),
+        annotations,
+      )
       setDoc({
         title: parsed.document.title,
         text: parsed.document.text,
@@ -648,6 +783,8 @@ export default function App() {
         coverageTags: normalizeCoverageTags(parsed.coverageTags),
         baseline,
         reviewedDiffs,
+        sampleConfig,
+        sampleReviews,
         updatedAt: Date.now(),
       })
       setMode('view')
@@ -733,6 +870,16 @@ export default function App() {
             >
               快照对比
               {pendingReviewCount > 0 && <span className="topbar-count">{pendingReviewCount}</span>}
+            </button>
+          )}
+          {mode === 'view' && (
+            <button
+              className={`btn ${pendingSampleCount > 0 ? 'btn-warn' : 'btn-ghost'}`}
+              onClick={scrollToSampling}
+              title="按标签配额与种子抽样复核已绑定标注"
+            >
+              抽样复核
+              {pendingSampleCount > 0 && <span className="topbar-count">{pendingSampleCount}</span>}
             </button>
           )}
           <button className="btn btn-ghost" onClick={() => fileInputRef.current?.click()}>
@@ -826,6 +973,9 @@ export default function App() {
               {doc.baseline && pendingReviewCount > 0 && (
                 <span className="foot-snapshot">（{pendingReviewCount} 条快照差异待审）</span>
               )}
+              {doc.sampleConfig && pendingSampleCount > 0 && (
+                <span className="foot-sampling">（{pendingSampleCount} 条抽样待复核）</span>
+              )}
               {' '}· 数据自动保存在本浏览器
             </footer>
           </section>
@@ -850,6 +1000,13 @@ export default function App() {
             onClearBaseline={clearBaseline}
             onToggleReview={toggleReview}
             snapshotSectionRef={snapshotSectionRef}
+            sampleConfig={doc.sampleConfig}
+            sampleQueue={sampleQueue}
+            sampleReviews={doc.sampleReviews}
+            onSaveSampleConfig={saveSampleConfig}
+            onClearSampleConfig={clearSampleConfig}
+            onSetSampleReview={setSampleReview}
+            samplingSectionRef={samplingSectionRef}
             onFocus={focusAnnotation}
             onEdit={(a) =>
               setPopover({
@@ -866,6 +1023,7 @@ export default function App() {
             onConfigureRules={() => setPopover({ kind: 'rules' })}
             onRenameTags={() => setPopover({ kind: 'rename-tags' })}
             tagCount={allTags.length}
+            allTags={allTags}
           />
         </main>
       )}

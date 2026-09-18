@@ -1581,6 +1581,282 @@ button {
   margin-top: 8px;
 }
 
+/* ---------- 抽样复核 ---------- */
+
+.side-heading-sampling {
+  color: #6d45c2;
+}
+
+.sampling-count-badge {
+  background: #6d45c2;
+}
+
+.foot-sampling {
+  color: #6d45c2;
+  font-weight: 600;
+}
+
+.sample-config {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+}
+
+.sample-seed-label {
+  margin-top: 0;
+}
+
+.sample-seed-row {
+  display: flex;
+  gap: 6px;
+}
+
+.sample-seed-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.sample-config .side-hint {
+  margin: 6px 0 8px;
+}
+
+.sample-tag-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.sample-tag-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sample-tag-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  color: #3d5178;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sample-count-input {
+  width: 64px;
+  flex-shrink: 0;
+  padding: 5px 8px;
+}
+
+.sample-tag-pool {
+  flex-shrink: 0;
+  width: 78px;
+  font-size: 11.5px;
+  color: var(--ink-faint);
+  text-align: right;
+}
+
+.sample-tag-row-over .sample-tag-pool {
+  color: var(--warn);
+}
+
+.sample-over-flag {
+  font-style: normal;
+}
+
+.sample-config-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sample-config-hint {
+  font-size: 11.5px;
+  color: var(--ink-faint);
+}
+
+.sample-config-meta code {
+  font-size: 11.5px;
+  word-break: break-all;
+}
+
+.sample-tag-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-bottom: 10px;
+}
+
+.sample-tag-stat {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--ink-faint);
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 5px 10px;
+}
+
+.sample-stat-tag {
+  flex-shrink: 0;
+  font-weight: 600;
+  color: #3d5178;
+}
+
+.sample-stat-nums {
+  min-width: 0;
+}
+
+.sample-stat-nums strong {
+  color: var(--ink);
+  font-size: 12.5px;
+}
+
+.sample-stat-gap,
+.sample-stat-over {
+  font-style: normal;
+  font-weight: 600;
+}
+
+.sample-stat-gap {
+  color: var(--danger);
+}
+
+.sample-stat-gap-num {
+  color: var(--danger);
+}
+
+.sample-stat-over {
+  color: var(--warn);
+}
+
+.sample-stat-ok {
+  font-style: normal;
+  color: #1a6b3c;
+}
+
+.sample-gap-hint {
+  margin: 0 0 10px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--warn-bg);
+  color: var(--warn);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.sample-item {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-left-width: 3px;
+  border-left-color: #8b6fd6;
+  border-radius: var(--radius);
+  padding: 9px 11px;
+  margin-bottom: 10px;
+}
+
+.sample-pass {
+  border-left-color: #1a6b3c;
+  background: #f7fdf9;
+}
+
+.sample-return {
+  border-left-color: var(--danger);
+  background: #fef7f7;
+}
+
+.sample-active {
+  border-color: var(--primary);
+  border-left-color: var(--primary);
+  box-shadow: 0 0 0 2px rgba(47, 107, 255, 0.18);
+}
+
+.sample-head {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+
+.sample-index {
+  flex-shrink: 0;
+  min-width: 20px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--ink-faint);
+  text-align: right;
+}
+
+.sample-head .ann-badge {
+  margin-top: 0;
+  align-self: center;
+}
+
+.sample-quote {
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  text-align: left;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--ink);
+  cursor: pointer;
+  word-break: break-word;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.sample-quote:hover {
+  text-decoration: underline;
+}
+
+.sample-tags-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  margin: 7px 0 0 27px;
+}
+
+.sample-tags-row .ann-tag {
+  margin: 0;
+}
+
+.sample-tag-filled {
+  background: #ece5fb;
+  color: #5b3aa0;
+  font-weight: 600;
+}
+
+.sample-meta {
+  font-size: 11.5px;
+  color: var(--ink-faint);
+}
+
+.sample-reviewed-at {
+  white-space: nowrap;
+}
+
+.sample-note {
+  margin: 7px 0 0 27px;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.sample-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 0 27px;
+}
+
 /* ---------- 响应式 ---------- */
 
 @media (max-width: 980px) {
