@@ -5,6 +5,7 @@ import type {
   DocumentData,
   ExportPayload,
   IgnoredConflict,
+  SampleVerdict,
 } from './types'
 import {
   fingerprint,
@@ -41,6 +42,15 @@ import {
   reviewedKey,
   type SnapshotDiffItem,
 } from './lib/snapshot'
+import {
+  buildSamplingPlan,
+  makeSamplingConfig,
+  normalizeSampleReviews,
+  normalizeSamplingConfig,
+  pruneSampleReviews,
+  sampleReviewKey,
+  type SamplingQuotaInput,
+} from './lib/sampling'
 import { TextView, type ViewRect } from './components/TextView'
 import { TextEditor } from './components/TextEditor'
 import { Sidebar } from './components/Sidebar'
@@ -73,6 +83,8 @@ const EMPTY_DOC: DocumentData = {
   coverageTags: [],
   baseline: null,
   reviewedDiffs: [],
+  samplingConfig: null,
+  sampleReviews: [],
   updatedAt: Date.now(),
 }
 
@@ -102,6 +114,7 @@ export default function App() {
   const conflictSectionRef = useRef<HTMLElement | null>(null)
   const coverageSectionRef = useRef<HTMLElement | null>(null)
   const snapshotSectionRef = useRef<HTMLElement | null>(null)
+  const samplingSectionRef = useRef<HTMLElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // 本地持久化
@@ -197,6 +210,40 @@ export default function App() {
       reviewedDiffs: pruneReviewedDiffs(d.reviewedDiffs, diffSnapshot(d.baseline, d.annotations)),
     }))
   }, [snapshotDiffs, doc.reviewedDiffs])
+
+  // ---------- 抽样复核 ----------
+
+  // 队列完全由配置 + 当前已绑定标注决定：配置 / 标注任何变化即自动重算，
+  // 但同一配置在同一标注集上必然得到同一队列（纯函数、确定性）
+  const samplingPlan = useMemo(
+    () => buildSamplingPlan(doc.samplingConfig, doc.annotations),
+    [doc.samplingConfig, doc.annotations],
+  )
+  const sampleReviews = useMemo(
+    () => pruneSampleReviews(doc.sampleReviews, samplingPlan),
+    [doc.sampleReviews, samplingPlan],
+  )
+  const pendingSampleCount = samplingPlan.queue.filter(
+    (item) =>
+      !sampleReviews.some(
+        (r) =>
+          sampleReviewKey(r.configKey, r.annotationId) ===
+          sampleReviewKey(samplingPlan.configKey, item.annotationId),
+      ),
+  ).length
+
+  // 复核结论失效清理：配置变化、标注删除 / 退出已绑定 / 内容变化（签名改变）后，
+  // 无法命中当前队列的记录在此移除
+  useEffect(() => {
+    if (sampleReviews.length === doc.sampleReviews.length) return
+    setDoc((d) => ({
+      ...d,
+      sampleReviews: pruneSampleReviews(
+        d.sampleReviews,
+        buildSamplingPlan(d.samplingConfig, d.annotations),
+      ),
+    }))
+  }, [sampleReviews, doc.sampleReviews])
 
   const highlightIds: string[] = activePairIds
     ? [...activePairIds]
@@ -299,6 +346,7 @@ export default function App() {
           conflictRules: d.conflictRules,
           ignoredConflicts: d.ignoredConflicts,
           coverageTags: d.coverageTags,
+          samplingConfig: d.samplingConfig,
         },
         source,
         target,
@@ -310,6 +358,7 @@ export default function App() {
         conflictRules: plan.rules,
         ignoredConflicts: plan.ignoredConflicts,
         coverageTags: plan.coverageTags,
+        samplingConfig: plan.samplingConfig,
         updatedAt: Date.now(),
       }
     })
@@ -425,6 +474,74 @@ export default function App() {
 
   const scrollToSnapshot = () => {
     snapshotSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
+  // ---------- 抽样复核 ----------
+
+  const scrollToSampling = () => {
+    samplingSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
+  /** 保存 / 更新抽样配置：归一化后整体替换；无法命中新队列的旧结论随即失效 */
+  const saveSamplingConfig = (quotas: SamplingQuotaInput[], seed: string) => {
+    const config = makeSamplingConfig(quotas, seed)
+    if (!config) return
+    setDoc((d) => ({
+      ...d,
+      samplingConfig: config,
+      sampleReviews: pruneSampleReviews(
+        d.sampleReviews,
+        buildSamplingPlan(config, d.annotations),
+      ),
+      updatedAt: Date.now(),
+    }))
+  }
+
+  const clearSamplingConfig = () => {
+    setDoc((d) => ({
+      ...d,
+      samplingConfig: null,
+      sampleReviews: [],
+      updatedAt: Date.now(),
+    }))
+  }
+
+  /**
+   * 写入 / 清除一条复核结论。结论以「配置键 + 标注 ID + 当前内容签名」落库：
+   * 标注内容之后若发生变化，签名不再命中队列，该结论自动失效。
+   */
+  const setSampleVerdict = (
+    annotationId: string,
+    verdict: SampleVerdict | null,
+    note: string,
+  ) => {
+    setDoc((d) => {
+      const plan = buildSamplingPlan(d.samplingConfig, d.annotations)
+      const item = plan.queue.find((q) => q.annotationId === annotationId)
+      if (!item) return d
+      const key = sampleReviewKey(plan.configKey, annotationId)
+      const others = d.sampleReviews.filter(
+        (r) => sampleReviewKey(r.configKey, r.annotationId) !== key,
+      )
+      if (!verdict) {
+        // 清除结论（备注一并移除）
+        return { ...d, sampleReviews: others, updatedAt: Date.now() }
+      }
+      const now = Date.now()
+      const prev = d.sampleReviews.find(
+        (r) => sampleReviewKey(r.configKey, r.annotationId) === key,
+      )
+      const next = {
+        configKey: plan.configKey,
+        annotationId,
+        signature: item.signature,
+        verdict,
+        note,
+        createdAt: prev?.createdAt ?? now,
+        updatedAt: now,
+      }
+      return { ...d, sampleReviews: [...others, next], updatedAt: now }
+    })
   }
 
   // ---------- 编辑原文与重定位 ----------
@@ -555,6 +672,22 @@ export default function App() {
         signature: r.signature,
         createdAt: new Date(r.createdAt).toISOString(),
       })),
+      samplingConfig: doc.samplingConfig
+        ? {
+            quotas: doc.samplingConfig.quotas.map((q) => ({ tag: q.tag, count: q.count })),
+            seed: doc.samplingConfig.seed,
+            createdAt: new Date(doc.samplingConfig.createdAt).toISOString(),
+          }
+        : null,
+      sampleReviews: sampleReviews.map((r) => ({
+        configKey: r.configKey,
+        annotationId: r.annotationId,
+        signature: r.signature,
+        verdict: r.verdict,
+        note: r.note,
+        createdAt: new Date(r.createdAt).toISOString(),
+        updatedAt: new Date(r.updatedAt).toISOString(),
+      })),
       annotations: doc.annotations.map((a) => ({
         id: a.id,
         status: a.status,
@@ -633,6 +766,12 @@ export default function App() {
         normalizeReviewedDiffs(parsed.reviewedDiffs),
         diffSnapshot(baseline, annotations),
       )
+      // 旧版导出文件不含抽样复核配置：无损补空；结论再按导入后的队列清洗
+      const samplingConfig = normalizeSamplingConfig(parsed.samplingConfig)
+      const sampleReviews = pruneSampleReviews(
+        normalizeSampleReviews(parsed.sampleReviews),
+        buildSamplingPlan(samplingConfig, annotations),
+      )
       setDoc({
         title: parsed.document.title,
         text: parsed.document.text,
@@ -648,6 +787,8 @@ export default function App() {
         coverageTags: normalizeCoverageTags(parsed.coverageTags),
         baseline,
         reviewedDiffs,
+        samplingConfig,
+        sampleReviews,
         updatedAt: Date.now(),
       })
       setMode('view')
@@ -733,6 +874,16 @@ export default function App() {
             >
               快照对比
               {pendingReviewCount > 0 && <span className="topbar-count">{pendingReviewCount}</span>}
+            </button>
+          )}
+          {mode === 'view' && (
+            <button
+              className={`btn ${pendingSampleCount > 0 ? 'btn-warn' : 'btn-ghost'}`}
+              onClick={scrollToSampling}
+              title="按标签配额与种子从已绑定标注中抽样复核"
+            >
+              抽样复核
+              {pendingSampleCount > 0 && <span className="topbar-count">{pendingSampleCount}</span>}
             </button>
           )}
           <button className="btn btn-ghost" onClick={() => fileInputRef.current?.click()}>
@@ -826,6 +977,9 @@ export default function App() {
               {doc.baseline && pendingReviewCount > 0 && (
                 <span className="foot-snapshot">（{pendingReviewCount} 条快照差异待审）</span>
               )}
+              {doc.samplingConfig && pendingSampleCount > 0 && (
+                <span className="foot-sampling">（{pendingSampleCount} 条抽样待复核）</span>
+              )}
               {' '}· 数据自动保存在本浏览器
             </footer>
           </section>
@@ -850,6 +1004,14 @@ export default function App() {
             onClearBaseline={clearBaseline}
             onToggleReview={toggleReview}
             snapshotSectionRef={snapshotSectionRef}
+            allTags={allTags}
+            samplingConfig={doc.samplingConfig}
+            samplingPlan={samplingPlan}
+            sampleReviews={sampleReviews}
+            onSaveSamplingConfig={saveSamplingConfig}
+            onClearSamplingConfig={clearSamplingConfig}
+            onSetSampleVerdict={setSampleVerdict}
+            samplingSectionRef={samplingSectionRef}
             onFocus={focusAnnotation}
             onEdit={(a) =>
               setPopover({

@@ -2,6 +2,7 @@ import type { DocumentData } from '../types'
 import { normalizeIgnored, normalizeRules } from './conflicts'
 import { normalizeCoverageTags } from './coverage'
 import { normalizeBaseline, normalizeReviewedDiffs } from './snapshot'
+import { normalizeSampleReviews, normalizeSamplingConfig } from './sampling'
 
 const STORAGE_KEY = 'anchor-annotation-console:v1'
 
@@ -25,6 +26,9 @@ export function loadDocument(): DocumentData | null {
       // 旧版本数据没有基线与已审记录：无损补空
       baseline: normalizeBaseline(data.baseline),
       reviewedDiffs: normalizeReviewedDiffs(data.reviewedDiffs),
+      // 旧版本数据没有抽样复核配置与结论：无损补空
+      samplingConfig: normalizeSamplingConfig(data.samplingConfig),
+      sampleReviews: normalizeSampleReviews(data.sampleReviews),
       updatedAt: data.updatedAt ?? Date.now(),
     }
   } catch {

@@ -12,6 +12,7 @@ import type {
   Annotation,
   ConflictRule,
   IgnoredConflict,
+  SamplingConfig,
 } from '../types'
 import {
   conflictIgnoredKey,
@@ -53,6 +54,8 @@ export interface TagRenamePlan {
   ignoredConflicts: IgnoredConflict[]
   /** 覆盖审计所选标签（同步精确替换，保序去重） */
   coverageTags: string[]
+  /** 抽样复核配置：配额标签同步精确替换（保序去重）；标签变化会使复核记录自动失效 */
+  samplingConfig: SamplingConfig | null
   annotationChanges: AnnotationTagChange[]
   ruleChanges: RuleChange[]
   /** 引用了源标签的规则总数（= changed + merged + deleted 明细数） */
@@ -74,6 +77,8 @@ interface RenamePlanInput {
   ignoredConflicts: IgnoredConflict[]
   /** 覆盖审计所选标签；缺省视为空（旧调用方兼容） */
   coverageTags?: string[]
+  /** 抽样复核配置；缺省视为无配置（旧调用方兼容） */
+  samplingConfig?: SamplingConfig | null
 }
 
 /** 判断规则是否引用源标签 */
@@ -107,7 +112,8 @@ export function planTagRename(
   const sourceExists =
     doc.annotations.some((a) => a.tags.includes(source)) ||
     doc.conflictRules.some((r) => touches(r, source)) ||
-    (doc.coverageTags ?? []).includes(source)
+    (doc.coverageTags ?? []).includes(source) ||
+    (doc.samplingConfig?.quotas ?? []).some((q) => q.tag === source)
   if (!sourceExists) return null
 
   // 覆盖审计所选标签：精确替换、保序去重（目标标签已在更前位置时跳过）
@@ -115,6 +121,22 @@ export function planTagRename(
   for (const t of doc.coverageTags ?? []) {
     const v = t === source ? target : t
     if (!coverageTags.includes(v)) coverageTags.push(v)
+  }
+
+  // 抽样复核配置：配额标签同样精确替换、保序去重（同标签多条配额在归一阶段已合并，
+  // 这里仅处理替换后与既有配额标签重名的情况——保留数量较大者）
+  let samplingConfig: SamplingConfig | null = null
+  if (doc.samplingConfig) {
+    const countByTag = new Map<string, number>()
+    for (const q of doc.samplingConfig.quotas) {
+      const v = q.tag === source ? target : q.tag
+      const prev = countByTag.get(v)
+      if (prev === undefined || q.count > prev) countByTag.set(v, q.count)
+    }
+    samplingConfig = {
+      ...doc.samplingConfig,
+      quotas: [...countByTag.entries()].map(([tag, count]) => ({ tag, count })),
+    }
   }
 
   // ---------- 1. 标注标签：精确替换 + 同条去重保序 ----------
@@ -266,6 +288,7 @@ export function planTagRename(
     rules,
     ignoredConflicts: kept,
     coverageTags,
+    samplingConfig,
     annotationChanges,
     ruleChanges,
     affectedRuleCount: doc.conflictRules.filter((r) => touches(r, source)).length,

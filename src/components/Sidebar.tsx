@@ -1,12 +1,21 @@
 import { forwardRef } from 'react'
 import type { RefObject } from 'react'
-import type { Annotation, AnnotationBaseline, ConflictRule } from '../types'
+import type {
+  Annotation,
+  AnnotationBaseline,
+  ConflictRule,
+  SampleReview,
+  SampleVerdict,
+  SamplingConfig,
+} from '../types'
 import { REASON_LABEL } from '../lib/relocation'
 import { badgeColor } from '../lib/segments'
 import type { ConflictItem } from '../lib/conflicts'
 import type { CoverageIssue, CoverageResult } from '../lib/coverage'
 import type { SnapshotDiffItem } from '../lib/snapshot'
+import type { SamplingPlan, SamplingQuotaInput } from '../lib/sampling'
 import { SnapshotSection } from './SnapshotSection'
+import { SamplingSection } from './SamplingSection'
 
 interface Props {
   text: string
@@ -31,6 +40,19 @@ interface Props {
   onToggleReview: (item: SnapshotDiffItem) => void
   /** 快照对比分区的滚动定位 ref（顶栏按钮用） */
   snapshotSectionRef?: RefObject<HTMLElement | null>
+  /** 抽样复核 */
+  allTags: string[]
+  samplingConfig: SamplingConfig | null
+  samplingPlan: SamplingPlan
+  sampleReviews: SampleReview[]
+  onSaveSamplingConfig: (quotas: SamplingQuotaInput[], seed: string) => void
+  onClearSamplingConfig: () => void
+  onSetSampleVerdict: (
+    annotationId: string,
+    verdict: SampleVerdict | null,
+    note: string,
+  ) => void
+  samplingSectionRef?: RefObject<HTMLElement | null>
   onFocus: (a: Annotation) => void
   onEdit: (a: Annotation) => void
   onRebindStart: (a: Annotation) => void
@@ -481,6 +503,20 @@ export const Sidebar = forwardRef<HTMLElement, Props>(function Sidebar(props, se
         onToggleReview={props.onToggleReview}
         onFocus={props.onFocus}
         sectionRef={props.snapshotSectionRef}
+      />
+
+      <SamplingSection
+        allTags={props.allTags}
+        config={props.samplingConfig}
+        plan={props.samplingPlan}
+        reviews={props.sampleReviews}
+        activeId={props.activeId}
+        annById={annById}
+        onSaveConfig={props.onSaveSamplingConfig}
+        onClearConfig={props.onClearSamplingConfig}
+        onSetVerdict={props.onSetSampleVerdict}
+        onFocus={props.onFocus}
+        sectionRef={props.samplingSectionRef}
       />
 
       <section className="side-section" ref={sectionRef as React.Ref<HTMLElement>}>

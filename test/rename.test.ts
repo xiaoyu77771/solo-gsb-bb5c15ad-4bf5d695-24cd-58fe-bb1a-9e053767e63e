@@ -421,4 +421,47 @@ check('预览计数与明细一致', () => {
   assert.strictEqual(plan.rules.length, 2) // 合并后 1 条 + r4
 })
 
+// 抽样复核配置：配额标签跟随重命名，保序去重取最大数；仅被配额引用的标签也算存在
+check('抽样复核配额标签随重命名同步替换并去重', () => {
+  const plan = planTagRename(
+    {
+      annotations: [ann(0, 10, ['其他'], 'x')],
+      conflictRules: [],
+      ignoredConflicts: [],
+      coverageTags: [],
+      samplingConfig: {
+        quotas: [
+          { tag: '旧名', count: 3 },
+          { tag: '新名', count: 5 },
+        ],
+        seed: 's',
+        createdAt: 1,
+      },
+    },
+    '旧名',
+    '新名',
+  )!
+  assert.deepStrictEqual(
+    plan.samplingConfig!.quotas.map((q) => [q.tag, q.count]),
+    [['新名', 5]],
+  )
+  assert.strictEqual(plan.samplingConfig!.seed, 's')
+})
+
+check('标签仅被抽样配额引用时重命名也可执行', () => {
+  const plan = planTagRename(
+    {
+      annotations: [ann(0, 10, ['其他'], 'x')],
+      conflictRules: [],
+      ignoredConflicts: [],
+      coverageTags: [],
+      samplingConfig: { quotas: [{ tag: '仅配额', count: 1 }], seed: 's', createdAt: 1 },
+    },
+    '仅配额',
+    '改名后',
+  )
+  assert.ok(plan)
+  assert.deepStrictEqual(plan!.samplingConfig!.quotas, [{ tag: '改名后', count: 1 }])
+})
+
 console.log(`\n全部 ${passed} 项通过`)

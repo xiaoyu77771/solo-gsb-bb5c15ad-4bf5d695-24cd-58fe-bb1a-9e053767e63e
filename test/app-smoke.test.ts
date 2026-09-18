@@ -709,4 +709,231 @@ console.log('  ✓ 旧数据无损兼容并自动补齐冲突字段')
 root4.unmount()
 container4.remove()
 container3.remove()
+
+// 抽样复核：配置 → 稳定队列 → 通过/退回 + 备注 → 持久化 → 内容变化结论失效
+{
+  const splText = '零一二三四五六七八九'
+  const splDoc = {
+    title: '抽样文档',
+    text: splText.repeat(4),
+    updatedAt: Date.now(),
+    annotations: [
+      {
+        id: 'sp_a',
+        quote: splText.slice(0, 3),
+        start: 0,
+        end: 3,
+        note: '',
+        tags: ['甲'],
+        status: 'bound',
+        createdAt: 1,
+        updatedAt: 1,
+        contextBefore: '',
+        contextAfter: '',
+      },
+      {
+        id: 'sp_b',
+        quote: splText.slice(3, 6),
+        start: 3,
+        end: 6,
+        note: '',
+        tags: ['甲', '乙'],
+        status: 'bound',
+        createdAt: 1,
+        updatedAt: 1,
+        contextBefore: '',
+        contextAfter: '',
+      },
+      {
+        id: 'sp_c',
+        quote: splText.slice(6, 9),
+        start: 6,
+        end: 9,
+        note: '',
+        tags: ['乙'],
+        status: 'bound',
+        createdAt: 1,
+        updatedAt: 1,
+        contextBefore: '',
+        contextAfter: '',
+      },
+      {
+        id: 'sp_p',
+        quote: '不存在的引文ZZZ',
+        start: 0,
+        end: 3,
+        note: '',
+        tags: ['甲'],
+        status: 'pending',
+        createdAt: 1,
+        updatedAt: 1,
+        contextBefore: '',
+        contextAfter: '',
+        pendingReason: '原文中已找不到该引文，需要手动重新选择',
+      },
+    ],
+  }
+  localStorage.setItem('anchor-annotation-console:v1', JSON.stringify(splDoc))
+  const c = document.createElement('div')
+  c.id = 'rootspl'
+  document.body.appendChild(c)
+  const r = createRoot(c)
+
+  await new Promise<void>((resolve) => {
+    r.render(React.createElement(React.StrictMode, null, React.createElement(App)))
+    setTimeout(resolve, 100)
+  })
+
+  const wait = () => new Promise<void>((resolve) => setTimeout(resolve, 50))
+  const saved = () => JSON.parse(localStorage.getItem('anchor-annotation-console:v1')!)
+
+  const html0 = c.innerHTML
+  assert.ok(html0.includes('抽样复核'), '应渲染抽样复核分区')
+  assert.ok(html0.includes('抽样数'), '无配置时应显示抽样数表单')
+  assert.ok(html0.includes('种子'), '无配置时应显示种子输入')
+
+  // 选择标签 #甲、#乙（在抽样复核表单内，避免误点覆盖审计的同名标签按钮）
+  ;(['#甲', '#乙'] as const).forEach((label) => {
+    const chip = [...c.querySelectorAll('.spl-form .cov-tag')].find(
+      (b) => b.textContent?.trim() === label,
+    ) as HTMLButtonElement
+    assert.ok(chip, `应出现标签选择按钮 ${label}`)
+    chip.click()
+  })
+
+  // 填种子
+  const seedInput = c.querySelector('.spl-seed-input') as HTMLInputElement
+  const setValue = Object.getOwnPropertyDescriptor(
+    window.HTMLInputElement.prototype,
+    'value',
+  )!.set!
+  setValue.call(seedInput, '质检种子001')
+  seedInput.dispatchEvent(new window.Event('input', { bubbles: true }))
+
+  // 每标签抽样数改为 2（默认 1；多标签标注会一次补足两个配额，故加大配额取更多项）
+  const countInputs = c.querySelectorAll('.spl-quota-count')
+  assert.strictEqual(countInputs.length, 2, '应为两个标签各显示一个数量输入')
+  countInputs.forEach((input) => {
+    setValue.call(input, '2')
+    input.dispatchEvent(new window.Event('input', { bubbles: true }))
+  })
+
+  const genBtn = [...c.querySelectorAll('button')].find(
+    (b) => b.textContent?.trim() === '生成抽样队列',
+  ) as HTMLButtonElement
+  assert.ok(genBtn, '应存在生成队列按钮')
+  genBtn.click()
+  await wait()
+
+  const state1 = saved()
+  assert.ok(state1.samplingConfig, '配置应持久化')
+  assert.strictEqual(state1.samplingConfig.seed, '质检种子001')
+  assert.deepStrictEqual(
+    state1.samplingConfig.quotas.map((q: { tag: string; count: number }) => [q.tag, q.count]).sort(),
+    [
+      ['乙', 2],
+      ['甲', 2],
+    ],
+  )
+
+  const html1 = c.innerHTML
+  assert.ok(html1.includes('目标'), '应显示配额表')
+  assert.ok(html1.includes('实际'), '应显示实际列')
+  assert.ok(html1.includes('缺口'), '应显示缺口列')
+  assert.ok(html1.includes('哈希 '), '队列项应展示哈希摘要')
+  // pending 标注不进入候选；队列中不应出现 sp_p
+  const items = [...c.querySelectorAll('.spl-item')]
+  assert.strictEqual(items.length, 3, '甲乙各 2 条、候选 3 条（一条双标签）→ 中选 3 条')
+  assert.ok(!html1.includes('sp_p'), '待处理标注不参与抽样')
+
+  // 确定性：重新挂载后队列完全一致
+  const orderBefore = items.map((el) => {
+    const m = el.querySelector('.spl-hash')?.textContent?.trim()
+    return m
+  })
+  r.unmount()
+  const c2 = document.createElement('div')
+  c2.id = 'rootspl2'
+  document.body.appendChild(c2)
+  const r2 = createRoot(c2)
+  await new Promise<void>((resolve) => {
+    r2.render(React.createElement(React.StrictMode, null, React.createElement(App)))
+    setTimeout(resolve, 100)
+  })
+  const orderAfter = [...c2.querySelectorAll('.spl-item')].map((el) =>
+    el.querySelector('.spl-hash')?.textContent?.trim(),
+  )
+  assert.deepStrictEqual(orderAfter, orderBefore, '同一配置重新加载后队列顺序必须一致')
+
+  // 第一条：填备注 + 标记通过
+  const firstCard = c2.querySelector('.spl-item') as HTMLElement
+  const noteArea = firstCard.querySelector('.spl-note') as HTMLTextAreaElement
+  const setAreaValue = Object.getOwnPropertyDescriptor(
+    window.HTMLTextAreaElement.prototype,
+    'value',
+  )!.set!
+  setAreaValue.call(noteArea, '复核通过备注')
+  noteArea.dispatchEvent(new window.Event('input', { bubbles: true }))
+  ;([...firstCard.querySelectorAll('button')].find(
+    (b) => b.textContent?.trim() === '通过',
+  ) as HTMLButtonElement).click()
+  await wait()
+  const afterPass = saved()
+  assert.strictEqual(afterPass.sampleReviews.length, 1)
+  assert.strictEqual(afterPass.sampleReviews[0].verdict, 'pass')
+  assert.strictEqual(afterPass.sampleReviews[0].note, '复核通过备注')
+  assert.ok(afterPass.sampleReviews[0].signature.length > 0)
+  assert.ok(firstCard.classList.contains('spl-pass'), '卡片应呈通过样式')
+
+  // 第二条：标记退回
+  const cards2 = c2.querySelectorAll('.spl-item')
+  ;([...cards2[1].querySelectorAll('button')].find(
+    (b) => b.textContent?.trim() === '退回',
+  ) as HTMLButtonElement).click()
+  await wait()
+  const afterReturn = saved()
+  assert.strictEqual(afterReturn.sampleReviews.length, 2)
+  assert.ok(
+    afterReturn.sampleReviews.some((x: { verdict: string }) => x.verdict === 'return'),
+    '应含退回结论',
+  )
+
+  // 顶栏与页脚出现抽样复核入口
+  assert.ok(c2.innerHTML.includes('抽样复核'), '顶栏应出现抽样复核入口')
+
+  // 内容变化（编辑第一条标注的备注）→ 对应结论自动失效
+  const mutated = {
+    ...afterReturn,
+    annotations: afterReturn.annotations.map((a: { id: string; note: string }) =>
+      a.id === afterReturn.sampleReviews[0].annotationId
+        ? { ...a, note: '标注内容被修改' }
+        : a,
+    ),
+  }
+  localStorage.setItem('anchor-annotation-console:v1', JSON.stringify(mutated))
+  r2.unmount()
+  const c3 = document.createElement('div')
+  c3.id = 'rootspl3'
+  document.body.appendChild(c3)
+  const r3 = createRoot(c3)
+  await new Promise<void>((resolve) => {
+    r3.render(React.createElement(React.StrictMode, null, React.createElement(App)))
+    setTimeout(resolve, 100)
+  })
+  await wait()
+  const afterMutate = saved()
+  const stale = afterMutate.sampleReviews.filter(
+    (x: { annotationId: string }) =>
+      x.annotationId === afterReturn.sampleReviews[0].annotationId,
+  )
+  assert.strictEqual(stale.length, 0, '内容签名失效的结论应被自动清理')
+  assert.strictEqual(afterMutate.sampleReviews.length, 1, '未变化标注的结论保留')
+  console.log('  ✓ 抽样复核：配置、稳定队列、通过/退回备注、持久化与内容失效')
+
+  r3.unmount()
+  c3.remove()
+  c2.remove()
+  c.remove()
+}
+
 console.log('\n全部渲染冒烟测试通过')

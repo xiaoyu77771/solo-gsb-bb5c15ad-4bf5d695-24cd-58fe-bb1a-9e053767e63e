@@ -17,6 +17,7 @@ import type {
   BaselineAnnotation,
   ReviewedDiff,
 } from '../types'
+import { cyrb53 } from './hash'
 
 /** 差异类型：新增 / 删除 / 修改 */
 export type SnapshotDiffKind = 'added' | 'removed' | 'modified'
@@ -140,26 +141,8 @@ function fieldChanges(
 }
 
 /** 快照内容的稳定序列化（签名输入，含全部参与对比的字段） */
-function serializeSnapshot(s: BaselineAnnotation): string {
+export function serializeSnapshot(s: BaselineAnnotation): string {
   return [s.status, s.start, s.end, s.quote, s.tags.join('\u0001'), s.note].join('\u0000')
-}
-
-/** cyrb53：确定性的 53 位字符串散列（同一内容跨会话签名一致） */
-function hash53(str: string): string {
-  let h1 = 0xdeadbeef
-  let h2 = 0x41c6ce57
-  for (let i = 0; i < str.length; i++) {
-    const ch = str.charCodeAt(i)
-    h1 = Math.imul(h1 ^ ch, 2654435761)
-    h2 = Math.imul(h2 ^ ch, 1597334677)
-  }
-  h1 =
-    Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^
-    Math.imul(h2 ^ (h2 >>> 13), 3266489909)
-  h2 =
-    Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^
-    Math.imul(h1 ^ (h1 >>> 13), 3266489909)
-  return (h2 >>> 0).toString(36) + (h1 >>> 0).toString(36)
 }
 
 /**
@@ -178,7 +161,7 @@ export function diffSignature(
       : kind === 'removed'
         ? `R|${serializeSnapshot(base!)}`
         : `M|${serializeSnapshot(base!)}|${serializeSnapshot(snapshotAnnotation(current!))}`
-  return hash53(payload)
+  return cyrb53(payload)
 }
 
 function sortRangeOf(
